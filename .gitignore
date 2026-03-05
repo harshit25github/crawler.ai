@@ -1,0 +1,7 @@
+node_modules/
+.env
+data/raw/*.json
+data/chunks/*.json
+data/traces/*.json
+data/crawl4ai/*.json
+qdrant_storage/
