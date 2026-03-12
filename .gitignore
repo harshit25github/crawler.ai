@@ -4,4 +4,5 @@ data/raw/*.json
 data/chunks/*.json
 data/traces/*.json
 data/crawl4ai/*.json
+data/crawl4ai/runs/
 qdrant_storage/

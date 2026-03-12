@@ -62,3 +62,88 @@ test("runDeepCrawlJob adds deep_crawl_strategy in crawler_config", async () => {
     },
   });
 });
+
+test("runClientSideDeepCrawl walks discovered links with depth control", async () => {
+  const utility = new Crawl4AIUtility({
+    crawl4aiBaseUrl: "http://localhost:11235",
+    crawl4aiPollIntervalMs: 1000,
+    crawl4aiTimeoutMs: 10000,
+  });
+
+  utility.crawl = async (payload) => {
+    const url = payload.urls[0];
+
+    if (url === "https://example.com/start") {
+      return {
+        results: [
+          {
+            success: true,
+            status_code: 200,
+            metadata: { title: "Start" },
+            markdown: { raw_markdown: "start content" },
+            links: {
+              internal: [{ href: "https://example.com/next" }],
+              external: [{ href: "https://outside.com/x" }],
+            },
+          },
+        ],
+      };
+    }
+
+    if (url === "https://example.com/next") {
+      return {
+        results: [
+          {
+            success: true,
+            status_code: 200,
+            metadata: { title: "Next" },
+            markdown: { raw_markdown: "next content" },
+            links: {
+              internal: [{ href: "https://example.com/end" }],
+              external: [],
+            },
+          },
+        ],
+      };
+    }
+
+    if (url === "https://example.com/end") {
+      return {
+        results: [
+          {
+            success: true,
+            status_code: 200,
+            metadata: { title: "End" },
+            markdown: { raw_markdown: "end content" },
+            links: {
+              internal: [],
+              external: [],
+            },
+          },
+        ],
+      };
+    }
+
+    throw new Error(`Unexpected URL ${url}`);
+  };
+
+  const result = await utility.runClientSideDeepCrawl(
+    "https://example.com/start",
+    {
+      maxDepth: 2,
+      maxPages: 10,
+      includeExternal: false,
+      crawlerConfig: { cache_mode: "bypass" },
+    },
+  );
+
+  assert.equal(result.crawledCount, 3);
+  assert.deepEqual(
+    result.pages.map((page) => page.url),
+    [
+      "https://example.com/start",
+      "https://example.com/next",
+      "https://example.com/end",
+    ],
+  );
+});
