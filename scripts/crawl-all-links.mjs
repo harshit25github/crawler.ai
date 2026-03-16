@@ -1,8 +1,8 @@
 import { mkdir, readFile, writeFile, appendFile } from "node:fs/promises";
 import { resolve, join } from "node:path";
 import process from "node:process";
-import { config } from "../src/config.js";
-import { Crawl4AIUtility } from "../src/services/crawl4ai-utility.js";
+import { Crawl4AIUtility } from "../src/crawler.js";
+import { config } from "../src/indexing.js";
 
 function parseArgs(argv) {
   const args = {};
@@ -299,4 +299,3 @@ main().catch((error) => {
   console.error(error);
   process.exit(1);
 });
-

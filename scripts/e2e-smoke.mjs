@@ -128,7 +128,7 @@ async function requestJson(url, options = {}) {
 
 function runCli(args, env) {
   return new Promise((resolveRun, rejectRun) => {
-    const child = spawn(process.execPath, ["src/cli.js", ...args], {
+    const child = spawn(process.execPath, ["src/agents.js", ...args], {
       cwd: rootDir,
       env,
       stdio: ["ignore", "pipe", "pipe"],
@@ -176,7 +176,7 @@ if (shouldUseMockOpenAI) {
   });
 }
 
-const { buildApp } = await import("../src/app.js");
+const { buildApp } = await import("../src/agents.js");
 const app = buildApp();
 
 try {

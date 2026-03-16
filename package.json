@@ -4,15 +4,20 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "node src/server.js",
-    "dev": "node src/server.js",
-    "cli": "node src/cli.js",
+    "start": "node src/agents.js server",
+    "dev": "node src/agents.js server",
+    "cli": "node src/agents.js",
     "test": "node --test",
     "smoke": "node scripts/e2e-smoke.mjs",
-    "crawl:all-links": "node scripts/crawl-all-links.mjs"
+    "crawl:all-links": "node scripts/crawl-all-links.mjs",
+    "eval:kb": "node scripts/evaluate-kb.mjs",
+    "eval:e2e50": "node scripts/evaluate-e2e-50.mjs"
   },
   "dependencies": {
+    "@openai/agents": "^0.1.0",
     "dotenv": "^16.4.7",
-    "fastify": "^5.2.1"
+    "fastify": "^5.2.1",
+    "openai": "^5.23.2",
+    "zod": "^4.1.5"
   }
 }

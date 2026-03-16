@@ -5,4 +5,7 @@ data/chunks/*.json
 data/traces/*.json
 data/crawl4ai/*.json
 data/crawl4ai/runs/
+data/evals
 qdrant_storage/
+docs/
+tests/

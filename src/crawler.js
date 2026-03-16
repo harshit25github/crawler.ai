@@ -1,5 +1,379 @@
-import { sleep } from "../lib/async.js";
-import { getJson, postJson } from "../lib/http.js";
+import { createHash } from "node:crypto";
+import { URL } from "node:url";
+
+globalThis.__crawlerInternals = { createHash, URL };
+
+export const REQUIRED_CRAWL_URLS = [
+  "https://www.cheapoair.com/info/privacy#personal-information",
+  "https://www.cheapoair.com/info/cookie-policy/",
+  "https://www.cheapoair.com/info/generaltermsandconditions/",
+  "https://www.cheapoair.com/travel/baggage-fees/",
+];
+
+const __asyncModule = (() => {
+async function sleep(ms) {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function mapWithConcurrency(items, concurrency, mapper) {
+  const results = new Array(items.length);
+  let nextIndex = 0;
+
+  async function worker() {
+    while (nextIndex < items.length) {
+      const currentIndex = nextIndex;
+      nextIndex += 1;
+      results[currentIndex] = await mapper(items[currentIndex], currentIndex);
+    }
+  }
+
+  const poolSize = Math.max(1, Math.min(concurrency, items.length));
+  await Promise.all(Array.from({ length: poolSize }, () => worker()));
+
+  return results;
+}
+
+  return { sleep, mapWithConcurrency };
+})();
+const __httpModule = (() => {
+async function requestJson(url, options = {}) {
+  const response = await fetch(url, {
+    ...options,
+    headers: {
+      "content-type": "application/json",
+      ...(options.headers || {}),
+    },
+  });
+
+  const text = await response.text();
+  let data = null;
+
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = { message: text };
+    }
+  }
+
+  if (!response.ok) {
+    const message =
+      data?.status?.error ||
+      data?.message ||
+      data?.error ||
+      `HTTP ${response.status} for ${url}`;
+
+    const error = new Error(message);
+    error.statusCode = response.status;
+    error.body = data;
+    throw error;
+  }
+
+  return data;
+}
+
+async function getJson(url, headers = {}) {
+  return requestJson(url, {
+    method: "GET",
+    headers,
+  });
+}
+
+async function postJson(url, body, headers = {}) {
+  return requestJson(url, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(body),
+  });
+}
+
+async function putJson(url, body, headers = {}) {
+  return requestJson(url, {
+    method: "PUT",
+    headers,
+    body: JSON.stringify(body),
+  });
+}
+
+  return { requestJson, getJson, postJson, putJson };
+})();
+const __crawl4aiResultModule = (() => {
+const { createHash, URL } = globalThis.__crawlerInternals;
+function sha256(value) {
+  return createHash("sha256").update(value).digest("hex");
+}
+function hashToUuid(value) {
+  const hash = sha256(value);
+  return [hash.slice(0, 8), hash.slice(8, 12), hash.slice(12, 16), hash.slice(16, 20), hash.slice(20, 32)].join("-");
+}
+function getDomain(url) {
+  return new URL(url).hostname;
+}
+function extractTitleFromMarkdown(markdown) {
+  const heading = String(markdown || "").replace(/\r\n/gu, "\n").trim().split("\n").map((line) => line.trim()).find((line) => line);
+  if (!heading) {
+    return "Untitled";
+  }
+  return heading.replace(/^#{1,6}\s+/u, "").trim() || "Untitled";
+}
+
+function firstDefined(values) {
+  return values.find(
+    (value) =>
+      value !== undefined &&
+      value !== null &&
+      !(typeof value === "string" && value.trim() === ""),
+  );
+}
+
+function pickResultPayload(payload) {
+  if (!payload || typeof payload !== "object") {
+    return payload;
+  }
+
+  if (Array.isArray(payload)) {
+    return pickResultPayload(payload[0]);
+  }
+
+  if (Array.isArray(payload.results)) {
+    return pickResultPayload(payload.results[0]);
+  }
+
+  if (Array.isArray(payload.data)) {
+    return pickResultPayload(payload.data[0]);
+  }
+
+  if (payload.result && payload.result !== payload) {
+    return pickResultPayload(payload.result);
+  }
+
+  return payload;
+}
+
+function extractCleanedText(result) {
+  const candidates = [
+    ["markdown.fit_markdown", result?.markdown?.fit_markdown],
+    ["markdown.raw_markdown", result?.markdown?.raw_markdown],
+    ["markdown", typeof result?.markdown === "string" ? result.markdown : null],
+    ["cleaned_text", result?.cleaned_text],
+    ["text", result?.text],
+    ["content", result?.content],
+    ["extracted_content", result?.extracted_content],
+  ];
+
+  const selected = candidates.find(
+    ([, value]) =>
+      value !== undefined &&
+      value !== null &&
+      !(typeof value === "string" && value.trim() === ""),
+  );
+
+  return {
+    source: selected?.[0] || null,
+    text: selected?.[1] || null,
+  };
+}
+
+function buildRawDocFromCrawlResult({
+  url,
+  result,
+  fetchedAt = new Date().toISOString(),
+  taskId = null,
+  source = "crawl4ai",
+}) {
+  const extracted = extractCleanedText(result);
+  const cleanedText = extracted.text?.trim();
+
+  if (!cleanedText) {
+    throw new Error(`Crawl completed for ${url}, but no text was extracted.`);
+  }
+
+  const title =
+    firstDefined([
+      result?.metadata?.title,
+      result?.title,
+      extractTitleFromMarkdown(cleanedText),
+    ]) || "Untitled";
+
+  return {
+    extracted,
+    title,
+    rawDoc: {
+      docId: hashToUuid(url),
+      url,
+      domain: getDomain(url),
+      title,
+      fetchedAt,
+      cleanedText,
+      contentHash: sha256(cleanedText),
+      metadata: {
+        taskId,
+        source,
+        status: result?.success === false ? "failed" : "completed",
+        crawlMetadata: result?.metadata || {},
+        statusCode: result?.status_code ?? null,
+        redirectedUrl: result?.redirected_url || null,
+      },
+    },
+  };
+}
+
+  return { firstDefined, pickResultPayload, extractCleanedText, buildRawDocFromCrawlResult };
+})();
+const __crawl4aiClientModule = (() => {
+const { getJson, postJson } = __httpModule;
+const { sleep } = __asyncModule;
+const { buildRawDocFromCrawlResult, pickResultPayload } = __crawl4aiResultModule;
+
+class Crawl4AIClient {
+  constructor(config) {
+    this.baseUrl = config.crawl4aiBaseUrl.replace(/\/+$/u, "");
+    this.pollIntervalMs = config.crawl4aiPollIntervalMs;
+    this.timeoutMs = config.crawl4aiTimeoutMs;
+  }
+
+  async submitJob(url) {
+    const response = await postJson(`${this.baseUrl}/crawl/job`, {
+      urls: [url],
+    });
+
+    const taskId = response?.task_id || response?.result?.task_id;
+
+    if (!taskId) {
+      throw new Error("Crawl4AI did not return a task_id.");
+    }
+
+    return {
+      taskId,
+      response,
+    };
+  }
+
+  async getJob(taskId) {
+    return getJson(`${this.baseUrl}/crawl/job/${taskId}`);
+  }
+
+  async crawlUrl(url, options = {}) {
+    const { trace } = options;
+
+    await trace?.recordStep({
+      stage: "crawl4ai_submit_request",
+      message: "Submitting URL to Crawl4AI.",
+      data: {
+        endpoint: `${this.baseUrl}/crawl/job`,
+        url,
+      },
+    });
+
+    const submit = await this.submitJob(url);
+    const taskId = submit.taskId;
+    const deadline = Date.now() + this.timeoutMs;
+    let pollCount = 0;
+
+    await trace?.recordStep({
+      stage: "crawl4ai_submit_response",
+      status: "success",
+      message: "Crawl4AI accepted the async crawl job.",
+      data: {
+        taskId,
+        responseKeys: Object.keys(submit.response || {}),
+      },
+    });
+
+    while (Date.now() < deadline) {
+      const job = await this.getJob(taskId);
+      const status = (job?.status || "").toLowerCase();
+      pollCount += 1;
+
+      await trace?.recordStep({
+        stage: "crawl4ai_poll",
+        message: "Polled Crawl4AI job status.",
+        data: {
+          taskId,
+          pollCount,
+          status,
+        },
+      });
+
+      if (status === "completed") {
+        const result = pickResultPayload(job);
+        const fetchedAt = new Date().toISOString();
+        const { rawDoc, extracted, title } = buildRawDocFromCrawlResult({
+          url,
+          result,
+          taskId,
+          fetchedAt,
+        });
+
+        await trace?.recordStep({
+          stage: "crawl4ai_completed",
+          status: "success",
+          message: "Crawl4AI returned extracted content.",
+          data: {
+            taskId,
+            pollCount,
+            title,
+            textLength: rawDoc.cleanedText.length,
+            extractedFrom: extracted.source,
+            metadataKeys: Object.keys(result?.metadata || {}),
+            redirectedUrl: result?.redirected_url || null,
+            statusCode: result?.status_code || null,
+          },
+        });
+
+        return {
+          rawDoc,
+          crawl4aiResponse: {
+            url,
+            taskId,
+            fetchedAt,
+            submitResponse: submit.response,
+            completedJobResponse: job,
+            selectedResultPayload: result,
+            selectedContent: {
+              source: extracted.source,
+              textLength: rawDoc.cleanedText.length,
+            },
+          },
+        };
+      }
+
+      if (status === "failed" || status === "cancelled") {
+        await trace?.recordStep({
+          stage: "crawl4ai_terminal_failure",
+          status: "error",
+          message: `Crawl4AI job ended with status ${status}.`,
+          data: {
+            taskId,
+            pollCount,
+          },
+        });
+        throw new Error(`Crawl4AI job ${taskId} ended with status ${status}.`);
+      }
+
+      await sleep(this.pollIntervalMs);
+    }
+
+    await trace?.recordStep({
+      stage: "crawl4ai_timeout",
+      status: "error",
+      message: "Timed out while polling Crawl4AI.",
+      data: {
+        taskId,
+        timeoutMs: this.timeoutMs,
+        pollCount,
+      },
+    });
+
+    throw new Error(`Timed out waiting for Crawl4AI job ${taskId}.`);
+  }
+}
+
+  return { Crawl4AIClient };
+})();
+const __crawl4aiUtilityModule = (() => {
+const { sleep } = __asyncModule;
+const { getJson, postJson } = __httpModule;
 
 function trimTrailingSlashes(value) {
   return value.replace(/\/+$/u, "");
@@ -23,7 +397,7 @@ function addQueryParams(path, params = {}) {
   return `${path}?${encoded}`;
 }
 
-export function extractTaskId(payload) {
+function extractTaskId(payload) {
   return payload?.task_id || payload?.result?.task_id || null;
 }
 
@@ -70,7 +444,7 @@ function normalizeUrls(urls) {
   return [...new Set(normalized)];
 }
 
-export class Crawl4AIUtility {
+class Crawl4AIUtility {
   constructor(config) {
     this.baseUrl = trimTrailingSlashes(config.crawl4aiBaseUrl);
     this.pollIntervalMs = config.crawl4aiPollIntervalMs;
@@ -480,3 +854,11 @@ export class Crawl4AIUtility {
     return this.get("/monitor/endpoints/stats");
   }
 }
+
+  return { extractTaskId, Crawl4AIUtility };
+})();
+export const { sleep, mapWithConcurrency } = __asyncModule;
+export const { requestJson, getJson, postJson, putJson } = __httpModule;
+export const { firstDefined, pickResultPayload, extractCleanedText, buildRawDocFromCrawlResult } = __crawl4aiResultModule;
+export const { Crawl4AIClient } = __crawl4aiClientModule;
+export const { extractTaskId, Crawl4AIUtility } = __crawl4aiUtilityModule;
