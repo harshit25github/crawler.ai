@@ -1,60 +1,106 @@
 # URL Knowledge Base Agent
 
-This project crawls a small set of web sources, converts them into retrievable records, indexes them in Qdrant, and answers grounded questions using mandatory HyDE retrieval plus an OpenAI Agent for final answer synthesis.
+This project crawls a fixed set of URLs, normalizes the crawled content into retrievable records, indexes those records in Qdrant, and answers grounded questions using mandatory HyDE retrieval plus an OpenAI Agent for final answer generation.
 
-The current codebase is intentionally flattened. The entire runtime now lives in only four source files:
+The runtime is intentionally flattened. The active code lives in only four files:
 
 - `src/crawler.js`
 - `src/indexing.js`
 - `src/retrivel.js`
 - `src/agents.js`
 
-## What The System Does
+## What The System Covers
 
-The system is built for two main content shapes:
+The current implementation is built for two content shapes:
 
-1. Structured policy pages
+1. Policy-style pages
    - Privacy Policy
    - Cookie Policy
    - General Terms and Conditions
 
-2. Structured baggage directory data
-   - CheapOair baggage-fees directory page
-   - Official airline baggage pages linked from that directory
+2. Baggage ecosystem data
+   - the CheapOair baggage-fees directory page
+   - official airline baggage pages linked from that directory
 
-These source types are treated differently during indexing and retrieval.
+Those two shapes are indexed and retrieved differently.
 
-## Hardcoded Crawl Seeds
+## Crawl Seeds
 
-The required seed URLs are hardcoded in `src/crawler.js` as `REQUIRED_CRAWL_URLS`:
+The current seed URLs are hardcoded in `src/crawler.js` as `REQUIRED_CRAWL_URLS`:
 
 - `https://www.cheapoair.com/info/privacy#personal-information`
 - `https://www.cheapoair.com/info/cookie-policy/`
 - `https://www.cheapoair.com/info/generaltermsandconditions/`
 - `https://www.cheapoair.com/travel/baggage-fees/`
 
-## End-To-End Flow
+## Crawl Strategy Per URL
 
-### 1. Crawling
+### Simple crawl URLs
 
-`src/crawler.js` is responsible for Crawl4AI interaction.
+These are treated as normal single-page crawls:
 
-It contains:
+- Privacy Policy
+- Cookie Policy
+- General Terms and Conditions
 
-- low-level HTTP helpers
-- async polling helpers
-- Crawl4AI job submission and polling logic
-- client-side deep crawl utility support
-- raw Crawl4AI result normalization
-
-For a normal page crawl:
+Flow:
 
 1. submit the URL to Crawl4AI
-2. poll until the job completes
-3. pick the best extracted text from the Crawl4AI response
-4. convert the result into a normalized raw document
+2. poll until the crawl finishes
+3. choose the best extracted text field from the Crawl4AI response
+4. convert the response into a normalized raw document
+5. pass that raw document to the indexing pipeline
 
-The normalized raw document contains fields such as:
+### Deep crawl URL
+
+The CheapOair baggage-fees page is treated as a discovery source, not just a single article page.
+
+Flow:
+
+1. crawl the root page
+2. parse the root page into structured baggage rows
+3. discover outbound airline policy links
+4. crawl those airline links through the deep-crawl workflow
+5. index the nested airline pages as official baggage-policy sources
+
+So the baggage system has two crawl layers:
+
+- the root CheapOair baggage directory page
+- the nested airline pages linked from that page
+
+## Existing Crawl Snapshots
+
+If the crawler server is unavailable, the repository already contains exported crawl snapshots that can be reused in another environment.
+
+Root crawl responses:
+
+- `raw-responses/required-crawl-urls`
+
+Deep baggage crawl snapshot:
+
+- `raw-responses/baggage-deep-crawl-latest`
+
+The deep snapshot contains:
+
+- `run-summary.json`
+- `result-index.json`
+- `raw-responses/` with one raw JSON file per nested airline page
+
+That means the system can be re-indexed from saved crawl output without re-running live crawling.
+
+## End-To-End Pipeline
+
+## 1. Crawling
+
+`src/crawler.js` is responsible for:
+
+- low-level HTTP calls
+- async polling helpers
+- Crawl4AI job submission and polling
+- client-side deep crawl helpers
+- raw Crawl4AI response normalization
+
+For each crawled page, the crawler converts the Crawl4AI result into a normalized raw document with fields such as:
 
 - `docId`
 - `url`
@@ -65,27 +111,41 @@ The normalized raw document contains fields such as:
 - `metadata.statusCode`
 - `metadata.redirectedUrl`
 
-### 2. Normalization And Indexing
+For deep baggage runs, the crawler layer also preserves:
 
-`src/indexing.js` handles everything from raw text to vector-ready records.
+- a run summary
+- a URL-to-file index
+- one raw JSON file per nested airline page
+
+## 2. Indexing
+
+`src/indexing.js` handles everything from raw text to indexed vector records.
 
 It contains:
 
-- environment config
+- config loading
 - file helpers
-- hashing and URL helpers
-- heading-aware chunking
-- source-type detection
-- document cleanup
+- hashing helpers
+- URL helpers
+- chunking
+- source typing
+- content cleanup
 - baggage row extraction
 - vector artifact construction
-- OpenAI embedding helpers
+- embedding helpers
 - Qdrant indexing helpers
 - ingestion services
 
+There are two ingestion patterns:
+
+1. `ingest`
+   - used for the fixed URLs and the root baggage page
+2. `ingest-run`
+   - used to import a stored deep crawl run for nested airline pages
+
 ### 2.1 Source Type Detection
 
-Each crawled page is classified into one of these source types:
+Each normalized document is classified into one of these source types:
 
 - `privacy_policy`
 - `cookie_policy`
@@ -94,30 +154,36 @@ Each crawled page is classified into one of these source types:
 - `baggage_directory_row`
 - `airline_policy`
 
-This matters because the system does not index every page shape the same way.
+That classification drives how the document is cleaned, split, and indexed.
 
-### 2.2 Policy Page Processing
+### 2.2 Policy Page Indexing
 
-For privacy, cookie, and terms pages:
+Privacy, cookie, and terms pages are treated as structured documents.
 
-1. boilerplate and navigation noise are removed
-2. markdown headings are preserved
-3. the document is split with heading-aware chunking
-4. each chunk keeps section metadata such as:
-   - `sectionTitle`
-   - `sectionPath`
-   - `sectionSlug`
-   - `text`
+Flow:
 
-This means policy retrieval is done over semantic chunks that still know which section they came from.
+1. remove boilerplate, menus, and repeated navigation
+2. preserve headings
+3. split the document with heading-aware chunking
+4. keep section metadata on every chunk
 
-### 2.3 Baggage Directory Processing
+Each chunk retains metadata such as:
 
-The CheapOair baggage-fees page is not treated like a normal article.
+- `sectionTitle`
+- `sectionPath`
+- `sectionSlug`
+- `text`
+- `contentHash`
 
-Instead of only chunking the whole page, the system parses it into structured airline rows.
+This makes policy retrieval section-aware instead of treating the document as one large text blob.
 
-For each row, it extracts values such as:
+### 2.3 Baggage Directory Indexing
+
+The CheapOair baggage-fees page is not indexed only as normal text chunks.
+
+Instead, it is parsed into row-level records, one record per airline-route row.
+
+Each `baggage_directory_row` can contain:
 
 - `airlineName`
 - `routeScope`
@@ -129,35 +195,74 @@ For each row, it extracts values such as:
 - `secondBagUrl`
 - `additionalPolicyUrl`
 
-Each extracted row becomes a first-class record with:
+Each row also gets:
 
+- a readable `text`
+- an `embeddingText`
 - `sourceType: baggage_directory_row`
-- readable `text`
-- retrieval-oriented `embeddingText`
 
-The root baggage page also still produces fallback chunks, but row records are the primary retrieval unit for directory queries.
+The root baggage page still also produces fallback page chunks, but row records are the primary retrieval unit for directory questions.
 
-### 2.4 Embeddings And Qdrant
+### 2.4 Nested Airline Page Indexing
+
+The airline pages discovered during deep crawl are indexed as `airline_policy` documents.
+
+Flow:
+
+1. read the raw response from the stored deep-crawl run
+2. normalize the page as `airline_policy`
+3. trim lead/footer noise when possible
+4. chunk by headings and paragraphs
+5. embed those chunks
+6. index them in Qdrant
+
+This gives the runtime an official source layer for detailed baggage rules.
+
+### 2.5 Embeddings And Qdrant
 
 After records are built:
 
 1. retrievable records are selected
-2. embeddings are created with OpenAI
-3. records are upserted into Qdrant with payload metadata
+2. embeddings are generated with OpenAI
+3. records are upserted into Qdrant
 
 Qdrant stores:
 
-- the vector
-- the record text
+- vectors
+- record text
 - source type
 - section metadata
 - airline metadata
 - route metadata
 - baggage row fields
 
-Local JSON files are also written under `data/` for inspection and debugging, but runtime retrieval is driven by Qdrant.
+Local JSON artifacts are also written for inspection, but runtime retrieval is driven by Qdrant.
 
-## Retrieval Flow
+## What Actually Gets Indexed
+
+### Policy pages
+
+Indexed as semantic text chunks with heading metadata.
+
+### CheapOair baggage page
+
+Indexed as:
+
+- `baggage_directory_row` records
+- fallback baggage page chunks
+
+### Nested airline pages
+
+Indexed as:
+
+- `airline_policy` chunks
+
+This separation is what allows the runtime to answer:
+
+- CheapOair directory questions from row data
+- official baggage rule questions from airline pages
+
+## 3. Retrieval
 
 `src/retrivel.js` contains the retrieval logic.
 
@@ -169,10 +274,10 @@ It includes:
 - privacy aspect detection
 - route-scope hint detection
 - HyDE search-plan generation
-- Qdrant search fusion
+- Qdrant result fusion
 - baggage row routing
-- linked policy expansion
-- privacy topic coverage repair
+- linked-policy expansion
+- privacy coverage repair
 
 ### 3.1 Query Understanding
 
@@ -194,66 +299,76 @@ Examples:
 
 Free-text retrieval always uses HyDE.
 
-The system:
+The runtime:
 
 1. sends the query to OpenAI to generate a short hypothetical source-like passage
-2. embeds that passage
+2. embeds that hypothetical passage
 3. also embeds the original query and any airline-focused variants
-4. searches Qdrant using those vectors
+4. searches Qdrant with those vectors
 5. fuses the result lists
 
-For privacy queries with multiple aspects, the system can generate aspect-specific HyDE passages such as:
+For privacy queries with multiple aspects, the runtime can generate additional HyDE passages such as:
 
 - `hyde:collect`
 - `hyde:use`
 - `hyde:disclose`
 
-### 3.3 Baggage Retrieval
+### 3.3 Retrieval Modes
 
-Baggage retrieval has two different modes.
+There are three practical retrieval modes.
 
-#### CheapOair baggage directory queries
+#### Mode A: CheapOair baggage directory query
 
-If the query is about the CheapOair baggage-fees page, the system tries `baggage_directory_row` mode first.
+If the question is about the CheapOair baggage-fees page, the runtime tries `baggage_directory_row` retrieval first.
 
-That means:
+Flow:
 
-1. detect airline and facet
-2. pull matching row records from Qdrant
+1. detect airline and baggage facet
+2. pull matching rows from Qdrant
 3. score rows by airline match, route scope, and field completeness
 4. return the best row hit
 
-If the query asks for `1st bag`, `2nd bag`, or `additional policy`, the system can expand from the row’s policy URL into the linked official airline page and retrieve detailed policy chunks from there.
+If the query also asks for linked baggage details such as `1st bag`, the runtime can expand from the row's policy URL into the nested official airline page and retrieve detailed policy chunks there.
 
-#### Official airline baggage page queries
+#### Mode B: Official airline baggage query
 
-If the query is about airline policy content rather than the CheapOair directory row itself, the system performs HyDE + semantic vector retrieval over `airline_policy` chunks.
+If the question is really about airline policy content, the runtime performs HyDE + semantic vector retrieval over `airline_policy` chunks.
 
-### 3.4 Privacy / Terms / Cookie Retrieval
+#### Mode C: Policy-page query
 
-For structured policy pages:
+For privacy, cookie, and terms pages, the runtime performs HyDE + semantic retrieval over heading-based chunks.
 
-1. heading-based chunks are searched semantically
-2. HyDE improves recall
-3. privacy coverage logic makes sure multi-topic questions are not answered from only one section when two sections are needed
+For privacy, there is also extra topic-coverage logic so multi-aspect questions do not get reduced to only one section.
 
-## Agent Flow
+## Retrieval Decision Tree
 
-`src/agents.js` is the top-level runtime and API/CLI entrypoint.
+In shorthand:
+
+- CheapOair baggage directory question -> row-first retrieval
+- official airline baggage question -> semantic chunk retrieval
+- privacy/cookie/terms question -> semantic chunk retrieval
+
+## 4. Agent Answer Generation
+
+`src/agents.js` is the top-level runtime entrypoint.
 
 It does three jobs:
 
 1. builds the runtime services
-2. exposes the Fastify API and CLI
-3. uses the OpenAI Agents SDK for final grounded answer generation
+2. exposes the API and CLI
+3. uses the OpenAI Agents SDK for final answer generation
 
-The OpenAI Agent is **not** used to perform retrieval.
+Important distinction:
 
-Instead:
+- retrieval happens first in `src/retrivel.js`
+- the OpenAI Agent is only used after retrieval
 
-1. `retrivel.js` retrieves the relevant rows/chunks
-2. `agents.js` formats that retrieved context
-3. the OpenAI Agent writes the final answer using only that context
+The flow is:
+
+1. retrieve the relevant rows/chunks
+2. format them as grounded context
+3. send that context to the OpenAI Agent
+4. generate a final cited answer
 
 So the system is:
 
@@ -280,16 +395,19 @@ npm run cli -- retrieve "According to the CheapOair baggage fees page, what are 
 npm run cli -- chat "What do the CheapOair terms say about mandatory arbitration?" --sourceType=terms_conditions --domain=www.cheapoair.com
 ```
 
-## Data Written During Ingestion
+## Files Written During Ingestion
 
 The runtime writes artifacts under `data/`:
 
-- `data/crawl4ai`: original Crawl4AI payloads
-- `data/raw`: normalized raw documents
-- `data/chunks`: chunk and directory-row artifacts
-- `data/traces`: ingestion traces
+- `data/crawl4ai` for original Crawl4AI payloads
+- `data/raw` for normalized raw documents
+- `data/chunks` for chunk and directory-row artifacts
+- `data/traces` for ingestion traces
 
-These artifacts are useful for debugging and inspection. Qdrant remains the live retrieval store.
+The exported reusable snapshots are at the repo root:
+
+- `raw-responses/required-crawl-urls`
+- `raw-responses/baggage-deep-crawl-latest`
 
 ## Tests
 
@@ -299,21 +417,21 @@ Run the test suite:
 npm test
 ```
 
-The suite covers:
+The test suite covers:
 
 - chunking
-- Crawl4AI utilities
+- Crawl4AI utility behavior
 - hybrid document building
 - ingestion traces
 - Qdrant filters
 - retrieval behavior
 - API health route
 
-## Current Mental Model
+## Mental Model
 
 Use this shortcut:
 
 - `src/crawler.js` = get text from the web
-- `src/indexing.js` = convert text into indexed records
-- `src/retrivel.js` = find the right records
+- `src/indexing.js` = convert crawled text into indexed records
+- `src/retrivel.js` = retrieve the right records
 - `src/agents.js` = turn retrieved records into a grounded answer

@@ -9,3 +9,5 @@ data/evals
 qdrant_storage/
 docs/
 tests/
+raw-responses/
+data/raw-responses/
