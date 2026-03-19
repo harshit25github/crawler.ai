@@ -67,6 +67,83 @@ function createMockOpenAIServer() {
         request.method === "POST" &&
         request.url === "/v1/chat/completions"
       ) {
+        const messages = Array.isArray(payload.messages) ? payload.messages : [];
+        const hasTools = Array.isArray(payload.tools) && payload.tools.length > 0;
+        const hasToolOutput = messages.some((message) => message.role === "tool");
+
+        if (hasTools && !hasToolOutput) {
+          const toolName = payload.tools[0]?.function?.name || "retrieve_context";
+
+          response.writeHead(200, { "content-type": "application/json" });
+          response.end(
+            JSON.stringify({
+              id: "mock-chat-tool-call",
+              object: "chat.completion",
+              created: Math.floor(Date.now() / 1000),
+              model: payload.model || "mock-chat-model",
+              choices: [
+                {
+                  index: 0,
+                  message: {
+                    role: "assistant",
+                    content: "",
+                    tool_calls: [
+                      {
+                        id: "call_retrieve_context_1",
+                        type: "function",
+                        function: {
+                          name: toolName,
+                          arguments: JSON.stringify({
+                            query:
+                              "What personal information does CheapOair collect?",
+                            topK: 4,
+                          }),
+                        },
+                      },
+                    ],
+                  },
+                  finish_reason: "tool_calls",
+                },
+              ],
+              usage: {
+                prompt_tokens: 10,
+                completion_tokens: 4,
+                total_tokens: 14,
+              },
+            }),
+          );
+          return;
+        }
+
+        if (hasTools && hasToolOutput) {
+          response.writeHead(200, { "content-type": "application/json" });
+          response.end(
+            JSON.stringify({
+              id: "mock-chat-final",
+              object: "chat.completion",
+              created: Math.floor(Date.now() / 1000),
+              model: payload.model || "mock-chat-model",
+              choices: [
+                {
+                  index: 0,
+                  message: {
+                    role: "assistant",
+                    content:
+                      "Mock grounded answer. Retrieved context came from the retrieval tool. [1]",
+                  },
+                  finish_reason: "stop",
+                },
+              ],
+              usage: {
+                prompt_tokens: 12,
+                completion_tokens: 6,
+                total_tokens: 18,
+              },
+            }),
+          );
+          return;
+        }
+
         response.writeHead(200, { "content-type": "application/json" });
         response.end(
           JSON.stringify({

@@ -1,6 +1,6 @@
 # URL Knowledge Base Agent
 
-This project crawls a fixed set of URLs, normalizes the crawled content into retrievable records, indexes those records in Qdrant, and answers grounded questions using mandatory HyDE retrieval plus an OpenAI Agent for final answer generation.
+This project crawls a fixed set of URLs, normalizes the crawled content into retrievable records, indexes those records in Qdrant, and answers grounded questions using mandatory HyDE retrieval plus a tool-calling OpenAI Agent.
 
 The runtime is intentionally flattened. The active code lives in only four files:
 
@@ -356,24 +356,31 @@ It does three jobs:
 
 1. builds the runtime services
 2. exposes the API and CLI
-3. uses the OpenAI Agents SDK for final answer generation
+3. uses the OpenAI Agents SDK to orchestrate retrieval and final answer generation
 
 Important distinction:
 
-- retrieval happens first in `src/retrivel.js`
-- the OpenAI Agent is only used after retrieval
+- `/api/retrieve` still calls `src/retrivel.js` directly
+- `/api/chat` now creates an agent with a `retrieve_context` function tool
+- that tool calls `RetrievalService.retrieve()`
+- HyDE still lives inside `src/retrivel.js`, but the hypothetical passage is now generated through an internal OpenAI SDK agent in `src/indexing.js`
+- the chat agent does not replace retrieval logic
 
 The flow is:
 
-1. retrieve the relevant rows/chunks
-2. format them as grounded context
-3. send that context to the OpenAI Agent
-4. generate a final cited answer
+1. user sends a chat question
+2. the OpenAI Agent is created for that request
+3. the agent is forced to call the `retrieve_context` tool first
+4. the tool runs `RetrievalService.retrieve()`
+5. retrieval executes HyDE + Qdrant search, or baggage row retrieval, depending on the query
+6. when HyDE is needed, an internal SDK-based HyDE agent writes the hypothetical passage used for retrieval
+7. the tool returns grounded chunks with stable citation indices
+8. the agent uses that tool output to write the final cited answer
 
 So the system is:
 
-- retrieval-first
-- agent-second
+- retrieval-service-first
+- agent-orchestrated
 
 ## Runtime Surfaces
 

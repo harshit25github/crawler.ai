@@ -4,6 +4,13 @@ import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { URL } from "node:url";
+import OpenAI from "openai";
+import {
+  Agent,
+  run,
+  setDefaultOpenAIClient,
+  setOpenAIAPI,
+} from "@openai/agents";
 
 globalThis.__indexingInternals = {
   process,
@@ -1761,7 +1768,9 @@ function buildRawDocFromCrawlResult({
   return { firstDefined, pickResultPayload, extractCleanedText, buildRawDocFromCrawlResult };
 })();
 const __openAiServiceModule = (() => {
-const { postJson } = globalThis.__indexingInternals;
+function postJson(...args) {
+  return globalThis.__indexingInternals.postJson(...args);
+}
 
 function requiredApiKey(apiKey) {
   if (!apiKey) {
@@ -1783,6 +1792,8 @@ class OpenAIService {
     this.baseUrl = config.openAiBaseUrl.replace(/\/+$/u, "");
     this.embeddingModel = config.openAiEmbeddingModel;
     this.chatModel = config.openAiChatModel;
+    this.sdkClient = null;
+    this.hydeAgent = null;
   }
 
   async createEmbeddings(inputs) {
@@ -1819,6 +1830,34 @@ class OpenAIService {
     };
   }
 
+  getSdkClient() {
+    if (!this.sdkClient) {
+      this.sdkClient = new OpenAI({
+        apiKey: this.apiKey,
+        baseURL: this.baseUrl,
+        timeout: 120_000,
+      });
+    }
+
+    return this.sdkClient;
+  }
+
+  getHydeAgent() {
+    if (!this.hydeAgent) {
+      this.hydeAgent = new Agent({
+        name: "HyDE Passage Generator",
+        model: this.chatModel,
+        instructions:
+          "Write one concise hypothetical passage that could plausibly appear in the source document needed to answer the user's question. Use source-like language and concrete details. Do not mention that the passage is hypothetical. Do not answer conversationally.",
+        modelSettings: {
+          temperature: 0.2,
+        },
+      });
+    }
+
+    return this.hydeAgent;
+  }
+
   async generateHypotheticalDocument({ query, filter = {} }) {
     const scope = [
       filter.sourceType ? `Source type: ${filter.sourceType}` : null,
@@ -1831,31 +1870,20 @@ class OpenAIService {
       .filter(Boolean)
       .join("\n");
 
-    const response = await postJson(
-      `${this.baseUrl}/chat/completions`,
-      {
-        model: this.chatModel,
-        temperature: 0.2,
-        messages: [
-          {
-            role: "system",
-            content:
-              "Write a concise hypothetical passage that could plausibly appear in the source document needed to answer the user's question. Use source-like language and concrete details. Do not mention that the passage is hypothetical. Do not answer conversationally.",
-          },
-          {
-            role: "user",
-            content: [
-              scope || "Source type: general web page",
-              `Question: ${query}`,
-              "Write one short passage that looks like grounded source content.",
-            ].join("\n"),
-          },
-        ],
-      },
-      buildHeaders(this.apiKey),
+    setOpenAIAPI("chat_completions");
+    setDefaultOpenAIClient(this.getSdkClient());
+
+    const result = await run(
+      this.getHydeAgent(),
+      [
+        scope || "Source type: general web page",
+        `Question: ${query}`,
+        "Write one short passage that looks like grounded source content.",
+      ].join("\n"),
+      { maxTurns: 1 },
     );
 
-    const content = response?.choices?.[0]?.message?.content?.trim();
+    const content = String(result.finalOutput || "").trim();
 
     if (!content) {
       throw new Error("OpenAI HyDE generation response was empty.");
@@ -1950,7 +1978,21 @@ class OpenAIService {
   return { OpenAIService };
 })();
 const __qdrantServiceModule = (() => {
-const { getJson, postJson, putJson, requestJson } = globalThis.__indexingInternals;
+function getJson(...args) {
+  return globalThis.__indexingInternals.getJson(...args);
+}
+
+function postJson(...args) {
+  return globalThis.__indexingInternals.postJson(...args);
+}
+
+function putJson(...args) {
+  return globalThis.__indexingInternals.putJson(...args);
+}
+
+function requestJson(...args) {
+  return globalThis.__indexingInternals.requestJson(...args);
+}
 
 function collectionVectorSize(payload) {
   const vectors = payload?.result?.config?.params?.vectors;
