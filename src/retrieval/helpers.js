@@ -333,6 +333,13 @@ function buildVectorFilter(filter = {}, airline = null) {
 
 function buildAirlineTargets(filter, routedAirlines) {
   if (filter.airline) {
+    if (routedAirlines.length) {
+      return uniqueBy(
+        routedAirlines.map((entry) => entry.airlineName).filter(Boolean),
+        (value) => value,
+      );
+    }
+
     return [filter.airline];
   }
 
