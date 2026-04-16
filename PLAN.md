@@ -45,3 +45,62 @@
 - The local crawl artifacts from March 5, 2026 are representative enough to design the indexing strategy.
 - The first release needs both grounded Q&A and airline comparison support.
 - The highest-quality outcome for this corpus comes from vectorless-first routing and fielded retrieval, with embeddings used only as a bounded fallback rather than the primary search method.
+$dirs = @(
+  'src\agents'
+  'src\api'
+  'src\crawler'
+  'src\indexing'
+  'src\retrieval'
+  'src\services'
+)
+
+$files = @(
+  'src\server.js'
+  'src\agents\chat-agent.js'
+  'src\agents\index.js'
+  'src\agents\interaction-logger.js'
+  'src\agents\kb-chat-service.js'
+  'src\agents\retrieve-context-tool.js'
+  'src\api\app.js'
+  'src\api\express-app.js'
+  'src\api\handlers.js'
+  'src\api\index.js'
+  'src\api\ingest-job-manager.js'
+  'src\api\inject-compat.js'
+  'src\api\openapi.js'
+  'src\api\request-utils.js'
+  'src\api\routes.js'
+  'src\crawler\async.js'
+  'src\crawler\client.js'
+  'src\crawler\http.js'
+  'src\crawler\index.js'
+  'src\crawler\result.js'
+  'src\crawler\urls.js'
+  'src\crawler\utility.js'
+  'src\indexing\artifacts.js'
+  'src\indexing\async.js'
+  'src\indexing\chunker.js'
+  'src\indexing\config.js'
+  'src\indexing\crawl4ai-result.js'
+  'src\indexing\files.js'
+  'src\indexing\hash.js'
+  'src\indexing\http.js'
+  'src\indexing\hybrid-documents.js'
+  'src\indexing\index.js'
+  'src\indexing\ingestion-service.js'
+  'src\indexing\ingestion-trace.js'
+  'src\indexing\openai-service.js'
+  'src\indexing\qdrant-service.js'
+  'src\indexing\run-import-service.js'
+  'src\indexing\services.js'
+  'src\indexing\url.js'
+  'src\indexing\vector-documents.js'
+  'src\retrieval\helpers.js'
+  'src\retrieval\index.js'
+  'src\retrieval\query-routing.js'
+  'src\retrieval\service.js'
+  'src\services\kb-system.js'
+)
+
+$dirs | ForEach-Object { New-Item -ItemType Directory -Force -Path $_ | Out-Null }
+$files | ForEach-Object { New-Item -ItemType File -Force -Path $_ | Out-Null }
