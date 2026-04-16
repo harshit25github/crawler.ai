@@ -2,12 +2,9 @@
 
 This project crawls a fixed set of URLs, normalizes the crawled content into retrievable records, indexes those records in Qdrant, and answers grounded questions using mandatory HyDE retrieval plus a tool-calling OpenAI Agent.
 
-The runtime is intentionally flattened. The active code lives in only four files:
-
-- `src/crawler.js`
-- `src/indexing.js`
-- `src/retrivel.js`
-- `src/agents.js`
+The runtime is now modular. `src/server.js` is the only root-level runtime file;
+all crawler, indexing, retrieval, agent, API, and service code lives inside
+domain folders under `src/`.
 
 ## What The System Covers
 
@@ -26,7 +23,7 @@ Those two shapes are indexed and retrieved differently.
 
 ## Crawl Seeds
 
-The current seed URLs are hardcoded in `src/crawler.js` as `REQUIRED_CRAWL_URLS`:
+The current seed URLs are hardcoded in `src/crawler/urls.js` as `REQUIRED_CRAWL_URLS`:
 
 - `https://www.cheapoair.com/info/privacy#personal-information`
 - `https://www.cheapoair.com/info/cookie-policy/`
@@ -92,7 +89,7 @@ That means the system can be re-indexed from saved crawl output without re-runni
 
 ## 1. Crawling
 
-`src/crawler.js` is responsible for:
+`src/crawler/*` is responsible for:
 
 - low-level HTTP calls
 - async polling helpers
@@ -119,7 +116,7 @@ For deep baggage runs, the crawler layer also preserves:
 
 ## 2. Indexing
 
-`src/indexing.js` handles everything from raw text to indexed vector records.
+`src/indexing/*` handles everything from raw text to indexed vector records.
 
 It contains:
 
@@ -264,7 +261,7 @@ This separation is what allows the runtime to answer:
 
 ## 3. Retrieval
 
-`src/retrivel.js` contains the retrieval logic.
+`src/retrieval/*` contains the retrieval logic.
 
 It includes:
 
@@ -350,7 +347,7 @@ In shorthand:
 
 ## 4. Agent Answer Generation
 
-`src/agents.js` is the top-level runtime entrypoint.
+`src/agents/index.js` is the agent CLI/export entrypoint.
 
 It does three jobs:
 
@@ -360,10 +357,10 @@ It does three jobs:
 
 Important distinction:
 
-- `/api/retrieve` still calls `src/retrivel.js` directly
+- `/api/retrieve` still calls `RetrievalService.retrieve()` directly
 - `/api/chat` now creates an agent with a `retrieve_context` function tool
 - that tool calls `RetrievalService.retrieve()`
-- HyDE still lives inside `src/retrivel.js`, but the hypothetical passage is now generated through an internal OpenAI SDK agent in `src/indexing.js`
+- HyDE still lives inside `src/retrieval/service.js`, but the hypothetical passage is now generated through an internal OpenAI SDK agent in `src/indexing/openai-service.js`
 - the chat agent does not replace retrieval logic
 
 The flow is:
@@ -388,8 +385,56 @@ So the system is:
 
 - `GET /health`
 - `POST /api/ingest`
+- `GET /api/ingest/jobs`
+- `GET /api/ingest/jobs/:jobId`
 - `POST /api/retrieve`
 - `POST /api/chat`
+- `POST /api/chat/baggage`
+- `GET /api/docs`
+- `GET /api/docs/openapi.json`
+
+The API server starts from `src/server.js`. The Express app is built in
+`src/api/app.js`, and route/handler logic is split under `src/api/`.
+
+Swagger UI is available at `http://localhost:3000/api/docs`. The raw OpenAPI JSON is available at `http://localhost:3000/api/docs/openapi.json`.
+
+`POST /api/ingest` is asynchronous. It accepts the same ingestion payloads as the CLI/API previously accepted, but returns immediately with a `jobId`:
+
+```json
+{
+  "jobId": "ingest_...",
+  "status": "queued",
+  "statusUrl": "/api/ingest/jobs/ingest_..."
+}
+```
+
+Monitor indexing progress with `GET /api/ingest/jobs/:jobId` or list recent jobs with `GET /api/ingest/jobs`. These jobs are stored in memory inside the Node API process, so they are suitable for local/internal runs but are not durable across server restarts.
+
+`POST /api/chat` is the user-facing endpoint. It intentionally accepts only a natural-language `query`; callers should not send retrieval filters, `topK`, or conversation history. The chat agent infers retrieval constraints through the `retrieve_context` tool instructions.
+
+`POST /api/chat/baggage` is a structured helper endpoint for baggage-policy questions. It accepts required `origin`, `destination`, `airline`, and `cabin`, plus optional `brandName`, builds the natural-language baggage query internally, and then sends that generated query through the same agent and `retrieve_context` tool flow used by `/api/chat`.
+
+Example request:
+
+```json
+{
+  "origin": "NYC",
+  "destination": "LAX",
+  "airline": "American Airlines",
+  "cabin": "economy",
+  "brandName": "elite"
+}
+```
+
+Generated agent query:
+
+```text
+I have a flight from NYC to LAX on American Airlines in economy class with elite brand, What will be the baggage policy
+```
+
+The response includes `generatedQuery`, `normalizedInput`, `answer`, `citations`, and `chunks`.
+
+`POST /api/retrieve` is a developer/debug endpoint for raw retrieval checks and can still accept explicit filters.
 
 ### CLI
 
@@ -424,6 +469,29 @@ Run the test suite:
 npm test
 ```
 
+Run the 30-case baggage route evaluation:
+
+```bash
+npm run eval:baggage-route
+```
+
+Useful options:
+
+```bash
+npm run eval:baggage-route -- --limit=3
+npm run eval:baggage-route -- --apiBaseUrl=http://localhost:3000
+npm run eval:baggage-route -- --outDir=data/evals/my-baggage-run
+```
+
+The script calls `POST /api/chat/baggage` and writes:
+
+- `data/evals/baggage-route-latest/report.xls`
+- `data/evals/baggage-route-latest/report.csv`
+- `data/evals/baggage-route-latest/report.json`
+- `data/evals/baggage-route-latest/summary.md`
+
+Reports are updated after every completed case, so partial results remain available if a long live agent run is interrupted.
+
 The test suite covers:
 
 - chunking
@@ -434,11 +502,30 @@ The test suite covers:
 - retrieval behavior
 - API health route
 
+## Modular Runtime Layout
+
+- `src/server.js` = Express server entrypoint used by `npm start`
+- `src/api/app.js` = Express app factory
+- `src/api/routes.js` = REST route registration
+- `src/api/handlers.js` = route handlers and request-level API logic
+- `src/api/ingest-job-manager.js` = in-process async indexing job registry
+- `src/api/request-utils.js` = shared request helpers and error handling
+- `src/api/inject-compat.js` = test compatibility helper for app injection
+- `src/services/kb-system.js` = dependency wiring for crawler, indexing, retrieval, and agent answering
+- `src/agents/chat-agent.js` = OpenAI SDK chat agent configuration
+- `src/agents/retrieve-context-tool.js` = `retrieve_context` tool, tool schema, citation registry, and tool logging
+- `src/agents/kb-chat-service.js` = agent orchestration for `answerQuery()`
+- `src/agents/interaction-logger.js` = chat/tool JSONL logging
+- `src/indexing/*` = indexing-facing module exports and service boundaries
+- `src/retrieval/*` = retrieval-facing module exports and query-routing boundaries
+- `src/crawler/*` = Crawl4AI crawler client and crawl helpers
+
 ## Mental Model
 
 Use this shortcut:
 
-- `src/crawler.js` = get text from the web
-- `src/indexing.js` = convert crawled text into indexed records
-- `src/retrivel.js` = retrieve the right records
-- `src/agents.js` = turn retrieved records into a grounded answer
+- `src/crawler/*` = get text from the web
+- `src/indexing/*` = convert crawled text into indexed records
+- `src/retrieval/*` = retrieve the right records
+- `src/agents/*` = turn retrieved records into a grounded answer through an OpenAI SDK tool-calling agent
+- `src/api/*` = expose the workflow as REST endpoints

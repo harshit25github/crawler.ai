@@ -1,7 +1,7 @@
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { config as baseConfig } from "../src/indexing.js";
-import { createKbSystem } from "../src/agents.js";
+import { config as baseConfig } from "../src/indexing/index.js";
+import { createKbSystem } from "../src/agents/index.js";
 
 const ROOT_URLS = [
   "https://www.cheapoair.com/info/privacy#personal-information",

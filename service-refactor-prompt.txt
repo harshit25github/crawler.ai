@@ -1,0 +1,298 @@
+You are working on a Node.js + Express backend. I already have the core business logic for:
+
+- indexing
+- retrieval
+- OpenAI agent tool integration
+- agent configuration
+
+Your job is to convert that code into a clean, production-style REST API service with proper modularity and Swagger documentation.
+
+Goal
+
+Refactor the current implementation into a modular Node.js + Express service that exposes APIs for:
+
+1. indexing
+2. agent-based answering/chat
+3. service health and docs
+
+Important constraint:
+
+- Do not create a separate public retrieval API.
+- Retrieval must remain internal to the agent workflow.
+- The user question should come to the API, then the OpenAI SDK agent should call the existing retrieval tool internally, and then the agent should respond.
+
+In short:
+
+User request
+-> API
+-> OpenAI SDK agent
+-> retrieval tool
+-> retrieval service
+-> grounded answer
+
+Important Context
+
+The current code already contains the business logic for:
+
+- document normalization
+- chunking
+- baggage directory row extraction
+- vector indexing
+- retrieval logic
+- HyDE-based search planning
+- tool-calling OpenAI agent orchestration
+
+That logic should be treated as the source of truth.
+
+Your task is to:
+
+- refactor it properly
+- modularize it
+- expose it through REST APIs
+- document it using Swagger / OpenAPI
+- follow good Express service practices
+
+Main Requirements
+
+1. Achieve modularity and proper refactoring
+
+The current code should be split into clear modules/layers such as:
+
+- config/
+- routes/
+- controllers/
+- services/
+- clients/
+- middlewares/
+- validators/
+- utils/
+- docs/ or OpenAPI spec location
+
+Suggested logical separation:
+
+- crawl/indexing service
+- retrieval service
+- agent/chat service
+- qdrant client
+- OpenAI client / agent wrapper
+- request validation
+- structured logging
+- error handling
+
+Do not keep everything in a few large files. Refactor for maintainability.
+
+2. Write REST APIs for the required actions
+
+Create APIs for at least the following actions:
+
+Indexing APIs
+
+- index a single URL
+- index multiple URLs
+- optionally index from saved raw payload/snapshot
+- return indexing status, summary, and errors
+
+Suggested endpoints:
+
+- POST /api/index/url
+- POST /api/index/urls
+- POST /api/index/raw
+- GET /api/index/status/:jobId if you introduce async jobs
+
+Agent/Chat API
+
+- expose the OpenAI SDK agent path
+- the agent must use the retrieval tool internally
+- the retrieval tool must call the existing retrieval service
+- return:
+  - final answer
+  - citations
+  - chunks / evidence
+
+Suggested endpoint:
+
+- POST /api/chat
+
+Operational APIs
+
+- service health
+- readiness / dependency checks
+- Swagger docs endpoint
+
+Suggested endpoints:
+
+- GET /health
+- GET /ready
+- GET /api/docs
+- GET /api/openapi.json
+
+3. Follow best practices for Node.js + Express
+
+Follow good REST service practices including:
+
+- clear project structure
+- controllers should stay thin
+- business logic should live in services
+- schema validation for request bodies and query params
+- centralized error handling middleware
+- proper HTTP status codes
+- structured logging
+- environment-based config
+- no hardcoded secrets
+- timeout / dependency failure handling
+- reusable client wrappers
+- Swagger/OpenAPI documentation for all endpoints
+- request/response examples in docs
+- graceful startup and shutdown
+- health check coverage for critical dependencies like Qdrant / OpenAI config
+
+Preserve Existing Business Logic
+
+Do not weaken or simplify the actual behavior already implemented.
+
+The existing logic includes important behavior that must remain intact:
+
+Retrieval behavior
+
+- HyDE-based search planning
+- multi-plan retrieval
+- weighted fusion / reranking
+- baggage directory row retrieval
+- route-aware baggage matching
+- linked policy expansion for baggage URLs
+- privacy topic coverage logic
+- citations in final outputs
+
+Agent behavior
+
+- OpenAI SDK agent
+- retrieval exposed as a tool
+- grounded answering only from retrieved evidence
+- stable citations where possible
+
+Indexing behavior
+
+- document normalization
+- section-aware chunking
+- baggage row extraction
+- vector creation and upsert
+- metadata retention for retrieval
+
+API Design Expectations
+
+Each endpoint should have:
+
+- request validation
+- typed/structured response shape
+- clear error responses
+- Swagger schema
+- examples
+
+Example response shapes:
+
+POST /api/chat
+
+{
+  "answer": "Delta allows ... [1]",
+  "citations": [
+    {
+      "citationIndex": 1,
+      "url": "https://...",
+      "title": "..."
+    }
+  ],
+  "chunks": [
+    {
+      "citationIndex": 1,
+      "sourceType": "airline_policy",
+      "text": "..."
+    }
+  ]
+}
+
+POST /api/index/url
+
+{
+  "url": "https://example.com",
+  "status": "indexed",
+  "documentId": "..."
+}
+
+Swagger / OpenAPI Expectations
+
+Provide:
+
+- OpenAPI 3 spec
+- endpoint descriptions
+- request schema
+- response schema
+- error schema
+- sample payloads
+- tags like:
+  - Indexing
+  - Chat
+  - Health
+
+Swagger docs should be usable by another developer without reading the source.
+
+Engineering Quality Expectations
+
+Please also include:
+
+- consistent naming
+- async/await best practices
+- minimal duplication
+- reusable DTO/mapper style helpers where useful
+- config-driven values
+- clear separation between transport layer and domain logic
+- unit-testable services
+
+If appropriate, add:
+
+- request ID middleware
+- structured logger
+- API versioning prefix like /api
+- compression / security middleware where reasonable
+
+What Not To Do
+
+- do not rewrite the business logic from scratch
+- do not remove HyDE or retrieval tool behavior
+- do not collapse everything into one file
+- do not make controllers hold business logic
+- do not expose a standalone public retrieval endpoint
+- do not bypass the agent -> retrieval tool -> retrieval service flow
+- do not break the current retrieval semantics
+
+Deliverables
+
+I expect:
+
+1. a modular Express codebase
+2. REST APIs for indexing and agent chat
+3. Swagger documentation
+4. clean startup entrypoint
+5. error handling and validation
+6. brief README section explaining how to run the service
+
+Files to Use as Reference
+
+Use the existing implementation as the source of truth, especially:
+
+- indexing logic
+- retrieval logic
+- agent + tool logic
+- current configuration patterns
+
+Refactor them into a proper service structure, but preserve behavior.
+
+Success Criteria
+
+The finished service should let another developer:
+
+- call an API to index URLs
+- call an API to ask a user question
+- have the OpenAI SDK agent call the retrieval tool internally
+- receive a grounded answer with citations
+- inspect the APIs through Swagger docs
+- understand the codebase because it is now modular and maintainable

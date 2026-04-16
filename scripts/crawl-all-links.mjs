@@ -1,8 +1,8 @@
 import { mkdir, readFile, writeFile, appendFile } from "node:fs/promises";
 import { resolve, join } from "node:path";
 import process from "node:process";
-import { Crawl4AIUtility } from "../src/crawler.js";
-import { config } from "../src/indexing.js";
+import { Crawl4AIUtility } from "../src/crawler/index.js";
+import { config } from "../src/indexing/index.js";
 
 function parseArgs(argv) {
   const args = {};

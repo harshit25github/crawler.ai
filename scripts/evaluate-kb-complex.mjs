@@ -8,8 +8,8 @@ import {
   QdrantService,
   readJson,
   RunImportService,
-} from "../src/indexing.js";
-import { RetrievalService } from "../src/retrivel.js";
+} from "../src/indexing/index.js";
+import { RetrievalService } from "../src/retrieval/index.js";
 
 const ROOT_URL_PATTERNS = [
   /https:\/\/www\.cheapoair\.com\/info\/privacy/iu,
@@ -115,6 +115,30 @@ function makeDirectoryCase({ id, category, query, airline, pattern, topK = 6 }) 
     expect: {
       minResults: 1,
       requiredTextPatterns: [new RegExp(airline, "iu"), pattern],
+    },
+  };
+}
+
+function makeDirectoryLinkedPolicyCase({
+  id,
+  query,
+  airlinePattern,
+  pattern,
+  topK = 6,
+}) {
+  return {
+    id,
+    category: "directory_linked_policy",
+    query,
+    topK,
+    filter: {
+      sourceType: "baggage_directory",
+      domain: "www.cheapoair.com",
+    },
+    expect: {
+      minResults: 2,
+      requiredAirlinePatterns: [airlinePattern],
+      requiredTextPatterns: [pattern],
     },
   };
 }
@@ -858,6 +882,81 @@ function buildDirectoryComparisonCases() {
   ];
 }
 
+function buildDirectoryLinkedPolicyCases() {
+  return [
+    makeDirectoryLinkedPolicyCase({
+      id: "directory_linked_air_canada_first_bag",
+      query:
+        "According to the CheapOair baggage fees page, what is Air Canada first checked bag policy?",
+      airlinePattern: /Air Canada/iu,
+      pattern: /\bChecked Baggage\b|\bmax\. weight per bag\b|\bAeroplan 25K\b/iu,
+    }),
+    makeDirectoryLinkedPolicyCase({
+      id: "directory_linked_air_india_first_bag",
+      query:
+        "According to the CheapOair baggage fees page, what is Air India first checked bag policy?",
+      airlinePattern: /Air India|@airindia/iu,
+      pattern: /\bDomestic flights\b|\b15 kg\/33 lb\b|\b25 kg\/55 lb\b/iu,
+    }),
+    makeDirectoryLinkedPolicyCase({
+      id: "directory_linked_united_first_bag",
+      query:
+        "According to the CheapOair baggage fees page, what is United Airlines first checked bag policy within USA?",
+      airlinePattern: /United/iu,
+      pattern: /\bPrepay for your checked bags\b|\bwithin the U\.S\.\b|\bchecked bags online\b/iu,
+    }),
+    makeDirectoryLinkedPolicyCase({
+      id: "directory_linked_westjet_first_bag",
+      query:
+        "According to the CheapOair baggage fees page, what is WestJet first checked bag policy?",
+      airlinePattern: /WestJet/iu,
+      pattern: /\bFirst piece on WestJet\b|\b50 lbs\. \(23 kg\)\b|\bMay apply\b/iu,
+    }),
+    makeDirectoryLinkedPolicyCase({
+      id: "directory_linked_british_airways_first_bag",
+      query:
+        "According to the CheapOair baggage fees page, what is British Airways first checked bag policy?",
+      airlinePattern: /British Airways/iu,
+      pattern: /\bExtra, heavy or large bags\?\b|\b23kg baggage weight limit\b|\bextra hold bag\b/iu,
+    }),
+    makeDirectoryLinkedPolicyCase({
+      id: "directory_linked_air_france_first_bag",
+      query:
+        "According to the CheapOair baggage fees page, what is Air France first checked bag policy?",
+      airlinePattern: /Air France/iu,
+      pattern: /\bhold baggage\b|\bchecked baggage\b|\bbaggage allowance\b/iu,
+    }),
+    makeDirectoryLinkedPolicyCase({
+      id: "directory_linked_aegean_first_bag",
+      query:
+        "According to the CheapOair baggage fees page, what is Aegean Airlines first checked bag policy?",
+      airlinePattern: /Aegean Airlines/iu,
+      pattern: /\bchecked baggage\b|\b32 kilos\b|\bbaggage allowance\b/iu,
+    }),
+    makeDirectoryLinkedPolicyCase({
+      id: "directory_linked_air_canada_additional_policy",
+      query:
+        "According to the CheapOair baggage fees page, what additional checked baggage rules does Air Canada mention?",
+      airlinePattern: /Air Canada/iu,
+      pattern: /\boverweight\/oversized\b|\b158 cm \(62in\)\b|\bcharges\b/iu,
+    }),
+    makeDirectoryLinkedPolicyCase({
+      id: "directory_linked_united_second_bag",
+      query:
+        "According to the CheapOair baggage fees page, what is United Airlines second checked bag policy?",
+      airlinePattern: /United/iu,
+      pattern: /\bchecked bag fee calculator\b|\bchecked bags online\b|\bwithin the U\.S\.\b/iu,
+    }),
+    makeDirectoryLinkedPolicyCase({
+      id: "directory_linked_westjet_additional_policy",
+      query:
+        "According to the CheapOair baggage fees page, what additional baggage policy does WestJet mention?",
+      airlinePattern: /WestJet/iu,
+      pattern: /\bGuests are allowed to check up to 4 bags\b|\boverweight or oversized baggage\b|\bWestJet Cargo\b/iu,
+    }),
+  ];
+}
+
 function buildNegativeCases() {
   const baseFilter = { sourceType: "airline_policy" };
 
@@ -894,11 +993,12 @@ function buildCases() {
     ...buildOfficialPolicyCases(),
     ...buildDirectorySingleCases(),
     ...buildDirectoryComparisonCases(),
+    ...buildDirectoryLinkedPolicyCases(),
     ...buildNegativeCases(),
   ];
 
-  if (cases.length !== 100) {
-    throw new Error(`Expected 100 cases, built ${cases.length}.`);
+  if (cases.length !== 110) {
+    throw new Error(`Expected 110 cases, built ${cases.length}.`);
   }
 
   return cases;

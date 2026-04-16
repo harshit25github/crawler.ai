@@ -8,8 +8,8 @@ import {
   QdrantService,
   readJson,
   RunImportService,
-} from "../src/indexing.js";
-import { RetrievalService } from "../src/retrivel.js";
+} from "../src/indexing/index.js";
+import { RetrievalService } from "../src/retrieval/index.js";
 
 function parseArgs(argv) {
   const args = {};
