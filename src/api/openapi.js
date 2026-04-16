@@ -528,6 +528,8 @@ export const openApiSpec = {
               "privacy_policy",
               "cookie_policy",
               "terms_conditions",
+              "service_fees",
+              "post_ticketing_fees",
               "baggage_directory",
               "baggage_directory_row",
               "airline_policy",

@@ -271,7 +271,7 @@ export function createRetrieveContextTool(options) {
       "The end user only provides natural language; infer any retrieval constraints yourself.",
       "For baggage questions, pass a concise query that preserves airline, origin, destination, cabin/class, fare brand, and requested baggage facets.",
       "For broad baggage-policy questions, do not over-filter to a single facet; let the retrieval service find directory rows plus linked official policy chunks.",
-      "Use filter.sourceType only when the user clearly asks about a specific document family such as privacy_policy, cookie_policy, terms_conditions, baggage_directory_row, or airline_policy.",
+      "Use filter.sourceType only when the user clearly asks about a specific document family such as privacy_policy, cookie_policy, terms_conditions, service_fees, post_ticketing_fees, baggage_directory_row, or airline_policy.",
       "Use filter.airline or filter.facet only when the user explicitly names an airline or asks for a specific facet, and only to narrow retrieval.",
       "Never invent filters that exclude likely relevant evidence.",
     ].join(" "),
@@ -311,7 +311,7 @@ export function createRetrieveContextTool(options) {
             sourceType: {
               type: "string",
               description:
-                "Optional source family such as privacy_policy, cookie_policy, terms_conditions, baggage_directory_row, or airline_policy. Omit for broad baggage-policy questions unless a specific source family is clearly needed.",
+                "Optional source family such as privacy_policy, cookie_policy, terms_conditions, service_fees, post_ticketing_fees, baggage_directory_row, or airline_policy. Omit for broad baggage-policy questions unless a specific source family is clearly needed.",
             },
             airline: {
               type: "string",

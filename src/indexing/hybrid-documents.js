@@ -32,6 +32,8 @@ const STRUCTURED_POLICY_SOURCE_TYPES = new Set([
   "privacy_policy",
   "cookie_policy",
   "terms_conditions",
+  "service_fees",
+  "post_ticketing_fees",
 ]);
 
 function normalizeText(text) {
@@ -79,6 +81,14 @@ function detectSourceType(url) {
 
   if (/\/info\/generaltermsandconditions\/?$/iu.test(url)) {
     return "terms_conditions";
+  }
+
+  if (/\/info\/service-fees\/?$/iu.test(url)) {
+    return "service_fees";
+  }
+
+  if (/\/info\/post-ticketing-fees\/?$/iu.test(url)) {
+    return "post_ticketing_fees";
   }
 
   if (/\/travel\/baggage-fees\/?$/iu.test(url)) {
