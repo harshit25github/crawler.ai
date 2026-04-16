@@ -5,6 +5,9 @@ import { buildVectorArtifacts } from "./vector-documents.js";
 import { fileStemForUrl } from "./url.js";
 import { buildChunkingSummary, createIngestionTrace } from "./ingestion-trace.js";
 
+const CHEAPOAIR_BAGGAGE_DIRECTORY_URL_PATTERN =
+  /^https?:\/\/www\.cheapoair\.com\/travel\/baggage-fees\/?$/iu;
+
 async function readOptionalJson(path) {
   try {
     return await readJson(path);
@@ -15,6 +18,40 @@ async function readOptionalJson(path) {
 
     throw error;
   }
+}
+
+function normalizeDiscoveredHttpUrl(url) {
+  try {
+    const parsed = new URL(String(url || "").trim());
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return null;
+    }
+
+    parsed.hash = "";
+    return parsed.toString();
+  } catch {
+    return null;
+  }
+}
+
+function isBaggageDirectorySeedUrl(url) {
+  return CHEAPOAIR_BAGGAGE_DIRECTORY_URL_PATTERN.test(String(url || "").trim());
+}
+
+function extractBaggageDirectoryLinkedUrls(crawl4aiResponse = {}) {
+  const externalLinks = Array.isArray(
+    crawl4aiResponse?.selectedResultPayload?.links?.external,
+  )
+    ? crawl4aiResponse.selectedResultPayload.links.external
+    : [];
+
+  return [
+    ...new Set(
+      externalLinks
+        .map((link) => normalizeDiscoveredHttpUrl(link?.href || link?.url))
+        .filter(Boolean),
+    ),
+  ];
 }
 
 class IngestionService {
@@ -36,6 +73,62 @@ class IngestionService {
     return this.runImportService.importRunDirectory(runDir);
   }
 
+  async prepareIngestTargets(urls, options = {}) {
+    const onProgress =
+      typeof options.onProgress === "function" ? options.onProgress : null;
+    const preparedTargets = [];
+    const seenUrls = new Set();
+
+    for (const rawUrl of urls) {
+      const url = String(rawUrl || "").trim();
+      if (!url || seenUrls.has(url)) {
+        continue;
+      }
+
+      const rootTarget = { url };
+      preparedTargets.push(rootTarget);
+      seenUrls.add(url);
+
+      if (!isBaggageDirectorySeedUrl(url)) {
+        continue;
+      }
+
+      try {
+        const crawlResult = await this.crawl4aiClient.crawlUrl(url);
+        rootTarget.prefetchedCrawlResult = crawlResult;
+
+        for (const linkedUrl of extractBaggageDirectoryLinkedUrls(
+          crawlResult.crawl4aiResponse,
+        )) {
+          if (seenUrls.has(linkedUrl)) {
+            continue;
+          }
+
+          preparedTargets.push({
+            url: linkedUrl,
+            discoveredFrom: url,
+            depth: 1,
+          });
+          seenUrls.add(linkedUrl);
+        }
+      } catch (error) {
+        onProgress?.({
+          event: "url_expansion_failed",
+          url,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    onProgress?.({
+      event: "urls_prepared",
+      seedTotal: urls.length,
+      total: preparedTargets.length,
+    });
+
+    return preparedTargets;
+  }
+
   async ingestUrl(url, options = {}) {
     const fileStem = fileStemForUrl(url);
     const crawl4aiPath = join(this.config.paths.crawl4aiDir, `${fileStem}.json`);
@@ -51,6 +144,7 @@ class IngestionService {
       message: "Started URL ingestion pipeline.",
         data: {
           force: Boolean(options.force),
+          reusedPrefetchedCrawlResult: Boolean(options.prefetchedCrawlResult),
           crawl4aiPath,
           rawPath,
           chunkPath,
@@ -58,7 +152,25 @@ class IngestionService {
       });
 
     try {
-      const crawlResult = await this.crawl4aiClient.crawlUrl(url, { trace });
+      const crawlResult = options.prefetchedCrawlResult
+        ? options.prefetchedCrawlResult
+        : await this.crawl4aiClient.crawlUrl(url, { trace });
+
+      if (options.prefetchedCrawlResult) {
+        await trace.recordStep({
+          stage: "crawl4ai_prefetched_result_reused",
+          status: "success",
+          message:
+            "Reused a prefetched Crawl4AI result while expanding the baggage directory seed URL.",
+          data: {
+            discoveredFrom: options.discoveredFrom || null,
+            selectedContentSource:
+              options.prefetchedCrawlResult?.crawl4aiResponse?.selectedContent
+                ?.source || null,
+          },
+        });
+      }
+
       const { rawDoc, crawl4aiResponse } = crawlResult;
       const previousRawDoc = await readOptionalJson(rawPath);
       const unchanged =
@@ -266,14 +378,24 @@ class IngestionService {
     }
   }
 
+  async ingestPreparedUrl(target, options = {}) {
+    return this.ingestUrl(target.url, {
+      ...options,
+      prefetchedCrawlResult: target.prefetchedCrawlResult,
+      discoveredFrom: target.discoveredFrom || null,
+    });
+  }
+
   async ingestUrls(urls, options = {}) {
     const uniqueUrls = [...new Set(urls.map((url) => url.trim()).filter(Boolean))];
     const onProgress =
       typeof options.onProgress === "function" ? options.onProgress : null;
+    const preparedTargets = await this.prepareIngestTargets(uniqueUrls, options);
     const results = await mapWithConcurrency(
-      uniqueUrls,
+      preparedTargets,
       this.config.ingestConcurrency,
-      async (url) => {
+      async (target) => {
+        const url = target.url;
         let result;
 
         try {
@@ -281,7 +403,7 @@ class IngestionService {
             event: "url_started",
             url,
           });
-          result = await this.ingestUrl(url, options);
+          result = await this.ingestPreparedUrl(target, options);
           return result;
         } catch (error) {
           result = {
@@ -304,7 +426,8 @@ class IngestionService {
     );
 
     return {
-      total: uniqueUrls.length,
+      seedTotal: uniqueUrls.length,
+      total: preparedTargets.length,
       ingested: results.filter((item) => item.status === "ingested").length,
       skipped: results.filter((item) => item.status === "skipped").length,
       failed: results.filter((item) => item.status === "failed").length,

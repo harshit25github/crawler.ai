@@ -192,6 +192,18 @@ export class IngestJobManager {
       return;
     }
 
+    if (
+      event.event === "urls_prepared" &&
+      Number.isInteger(event.total) &&
+      event.total > 0
+    ) {
+      job.progress = {
+        ...job.progress,
+        total: event.total,
+      };
+      return;
+    }
+
     if (event.event === "url_started") {
       job.progress = {
         ...job.progress,
